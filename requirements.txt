@@ -1,0 +1,18 @@
+fastapi>=0.110
+uvicorn>=0.29
+scikit-learn>=1.3
+rank-bm25>=0.2
+networkx>=3.2
+langgraph>=0.2
+numpy>=1.24
+pytest>=8.0
+
+# Optional, for production upgrades (not required to run the demo):
+# sentence-transformers   # real embeddings instead of TF-IDF (needs a CUDA-
+#                          # capable or CPU-wheel-accessible environment --
+#                          # torch's dependency footprint didn't fit this
+#                          # project's dev sandbox; works fine with normal
+#                          # internet/disk access)
+# faiss-cpu               # vector index instead of sklearn cosine similarity
+# neo4j                   # real graph DB instead of in-memory NetworkX
+# langchain-openai        # LLM-based abstractive summarization (needs OPENAI_API_KEY)
