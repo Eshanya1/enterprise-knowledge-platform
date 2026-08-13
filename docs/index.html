@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Enterprise Knowledge Intelligence Platform — Live Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root {
+    --navy: #1F3B57; --accent: #2E6BE6; --bg: #0d1117; --panel: #161b22;
+    --border: #30363d; --text: #c9d1d9; --muted: #8b949e; --green: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+  }
+  header {
+    padding: 28px 24px 20px; border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #131a24, var(--bg));
+  }
+  header h1 { margin: 0 0 6px; font-size: 22px; color: #fff; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; max-width: 760px; }
+  header a { color: #58a6ff; }
+  .badge {
+    display: inline-block; font-size: 11px; padding: 3px 8px; border-radius: 20px;
+    background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.4);
+    margin-left: 8px; vertical-align: middle;
+  }
+  main { max-width: 900px; margin: 0 auto; padding: 24px; }
+  .search-box {
+    display: flex; gap: 8px; margin-bottom: 8px;
+  }
+  input[type=text] {
+    flex: 1; padding: 12px 14px; font-size: 15px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--panel); color: #fff;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); }
+  button {
+    padding: 12px 20px; font-size: 14px; font-weight: 600; border-radius: 8px;
+    border: none; background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button:hover { background: #4079e8; }
+  .examples { margin: 10px 0 24px; font-size: 13px; color: var(--muted); }
+  .examples button.chip {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    font-size: 12px; padding: 5px 10px; border-radius: 20px; margin: 4px 4px 0 0; cursor: pointer;
+  }
+  .examples button.chip:hover { border-color: var(--accent); color: #fff; }
+  .stage {
+    font-size: 12px; color: var(--muted); margin: 18px 0 8px; text-transform: uppercase;
+    letter-spacing: 0.06em; display: flex; align-items: center; gap: 8px;
+  }
+  .stage::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .result {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 10px;
+  }
+  .result .top-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .result h3 { margin: 0; font-size: 15px; color: #fff; }
+  .score { font-size: 11px; color: var(--accent); font-family: monospace; white-space: nowrap; }
+  .result p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+  .tag {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    background: rgba(255,255,255,0.06); color: var(--muted); margin-right: 6px;
+  }
+  .graph-tag { color: #d29922; background: rgba(210,153,34,0.12); }
+  .empty { color: var(--muted); font-size: 14px; padding: 20px 0; }
+  .metrics {
+    display: flex; gap: 20px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--muted); flex-wrap: wrap;
+  }
+  .metrics b { color: #fff; }
+  footer { text-align: center; padding: 30px 20px; color: var(--muted); font-size: 12px; }
+  footer a { color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Enterprise Knowledge Intelligence Platform <span class="badge">● Live — running in your browser</span></h1>
+  <p>
+    Real hybrid retrieval (TF‑IDF + BM25, reciprocal-fused) with graph-based query expansion (GraphRAG),
+    reimplemented in JavaScript from the original
+    <a href="https://github.com/Eshanya1/enterprise-knowledge-platform" target="_blank">Python/FastAPI project</a>.
+    Type a query below — the ranking is computed live, not pre-written.
+  </p>
+</header>
+
+<main>
+  <div class="search-box">
+    <input type="text" id="queryInput" placeholder="e.g. why does token refresh fail intermittently" />
+    <button onclick="runQuery()">Search</button>
+  </div>
+  <div class="examples">
+    Try:
+    <button class="chip" onclick="setQuery('why does token refresh fail intermittently')">token refresh fail</button>
+    <button class="chip" onclick="setQuery('what does the auth service depend on')">auth service dependencies</button>
+    <button class="chip" onclick="setQuery('notification retry storm webhook failures')">retry storm</button>
+    <button class="chip" onclick="setQuery('session storage migration to redis')">session storage</button>
+  </div>
+
+  <div id="output"></div>
+
+  <div class="metrics" id="metrics" style="display:none;"></div>
+</main>
+
+<footer>
+  Full source, tests, and evaluation harness on
+  <a href="https://github.com/Eshanya1/enterprise-knowledge-platform" target="_blank">GitHub</a>.
+  This demo reimplements the retrieval + graph logic client-side; the production version also includes
+  a LangGraph multi-agent pipeline, API-key auth, and SQLite-backed query logging.
+</footer>
+
+<script>
+// ---- Same sample corpus & relationships as the Python project (sample_corpus.py) ----
+const DOCUMENTS = [
+  {id:"doc-1", title:"Auth Service Overview", text:"The auth-service handles login, token issuance, and session management for all internal APIs. It exposes REST endpoints for /login, /refresh, and /logout, and depends on the user-service for credential validation."},
+  {id:"doc-2", title:"User Service Overview", text:"The user-service owns the canonical user profile store. It is consumed by auth-service for credential checks and by billing-service for account status lookups."},
+  {id:"doc-3", title:"Token refresh race condition", text:"Under concurrent refresh requests, two valid refresh tokens can be issued for the same session, causing intermittent 401s in downstream services. Root cause traced to a missing row lock in the token table."},
+  {id:"doc-4", title:"Billing Service Overview", text:"billing-service calculates invoices and processes payments. It calls user-service to confirm account status before charging, and publishes payment-completed events consumed by the notification-service."},
+  {id:"doc-5", title:"ADR: Move sessions to Redis", text:"Decision record: session storage is moving from Postgres to Redis to reduce login latency. auth-service will read/write sessions through a new SessionStore interface, decoupling it from the underlying store."},
+  {id:"doc-6", title:"Notification service retry storm", text:"notification-service retries failed billing-service webhook deliveries without backoff, causing a retry storm during billing-service outages. Needs exponential backoff and a circuit breaker."},
+  {id:"doc-7", title:"Notification Service Overview", text:"notification-service sends email/SMS/push notifications triggered by events from billing-service and user-service."},
+  {id:"doc-8", title:"ADR: Circuit breaker library", text:"Decision record: adopt a circuit breaker library for all outbound webhook calls in notification-service, starting with billing-service webhook consumption, to prevent retry storms during downstream outages."},
+];
+const RELATIONSHIPS = [
+  ["doc-1","DEPENDS_ON","doc-2"], ["doc-3","AFFECTS","doc-1"], ["doc-5","MODIFIES","doc-1"],
+  ["doc-4","DEPENDS_ON","doc-2"], ["doc-4","PUBLISHES_TO","doc-7"], ["doc-6","AFFECTS","doc-7"],
+  ["doc-6","RELATES_TO","doc-4"], ["doc-8","RESOLVES","doc-6"],
+];
+const STOPWORDS = new Set(["the","a","an","is","are","of","to","for","and","in","on","by","it","its","with","was","be","this","that","from","as","at"]);
+
+function tokenize(text) {
+  return text.toLowerCase().match(/[a-z0-9]+/g)?.filter(t => !STOPWORDS.has(t)) || [];
+}
+
+// ---- Real TF-IDF ----
+const docTokens = DOCUMENTS.map(d => tokenize(d.title + " " + d.text));
+const vocab = [...new Set(docTokens.flat())];
+const df = {};
+vocab.forEach(term => { df[term] = docTokens.filter(toks => toks.includes(term)).length; });
+const N = DOCUMENTS.length;
+
+function tfidfVector(tokens) {
+  const tf = {};
+  tokens.forEach(t => tf[t] = (tf[t]||0) + 1);
+  const vec = {};
+  Object.keys(tf).forEach(term => {
+    if (!df[term]) return;
+    const idf = Math.log((N + 1) / (df[term] + 1)) + 1;
+    vec[term] = (tf[term] / tokens.length) * idf;
+  });
+  return vec;
+}
+function cosineSim(vecA, vecB) {
+  let dot = 0, magA = 0, magB = 0;
+  for (const k in vecA) { magA += vecA[k]**2; if (vecB[k]) dot += vecA[k]*vecB[k]; }
+  for (const k in vecB) { magB += vecB[k]**2; }
+  if (!magA || !magB) return 0;
+  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+}
+const docVectors = docTokens.map(tfidfVector);
+
+// ---- Real BM25 ----
+const avgLen = docTokens.reduce((s,t)=>s+t.length,0) / N;
+const k1 = 1.5, b = 0.75;
+function bm25Score(queryTokens, docIdx) {
+  const toks = docTokens[docIdx];
+  const len = toks.length;
+  let score = 0;
+  queryTokens.forEach(qt => {
+    const freq = toks.filter(t => t === qt).length;
+    if (!freq) return;
+    const idf = Math.log((N - (df[qt]||0) + 0.5) / ((df[qt]||0) + 0.5) + 1);
+    score += idf * (freq * (k1+1)) / (freq + k1 * (1 - b + b * (len/avgLen)));
+  });
+  return score;
+}
+
+function normalize(arr) {
+  const min = Math.min(...arr), max = Math.max(...arr);
+  const range = max - min;
+  return arr.map(v => range > 0 ? (v - min) / range : 0);
+}
+
+// ---- Hybrid retrieval: exact same fusion as retrieval.py ----
+function hybridSearch(query, topK=4) {
+  const qTokens = tokenize(query);
+  const qVec = tfidfVector(qTokens);
+  const semScores = docVectors.map(v => cosineSim(qVec, v));
+  const kwScores = docTokens.map((_, i) => bm25Score(qTokens, i));
+  const semNorm = normalize(semScores);
+  const kwNorm = normalize(kwScores);
+  const fused = DOCUMENTS.map((d, i) => ({
+    ...d, score: 0.5*semNorm[i] + 0.5*kwNorm[i], source: "retrieval"
+  }));
+  fused.sort((a,b) => b.score - a.score);
+  return fused.slice(0, topK);
+}
+
+// ---- Real graph traversal (mirrors graph_store.py) ----
+function graphNeighbors(docId, maxHops=1) {
+  const visited = { [docId]: [] };
+  let frontier = [docId];
+  for (let hop=0; hop<maxHops; hop++) {
+    const next = [];
+    frontier.forEach(node => {
+      RELATIONSHIPS.forEach(([src, rel, dst]) => {
+        if (src === node && !(dst in visited)) { visited[dst] = [...visited[node], rel]; next.push(dst); }
+        if (dst === node && !(src in visited)) { visited[src] = [...visited[node], "<-"+rel]; next.push(src); }
+      });
+    });
+    frontier = next;
+  }
+  delete visited[docId];
+  return Object.entries(visited).map(([id, path]) => ({
+    id, title: DOCUMENTS.find(d => d.id===id).title, path: path.join(" -> ")
+  }));
+}
+
+function setQuery(q) { document.getElementById('queryInput').value = q; runQuery(); }
+
+function runQuery() {
+  const query = document.getElementById('queryInput').value.trim();
+  const output = document.getElementById('output');
+  const metrics = document.getElementById('metrics');
+  if (!query) { output.innerHTML = '<div class="empty">Type a query above to search the knowledge base.</div>'; metrics.style.display='none'; return; }
+
+  const t0 = performance.now();
+  const broaden = /why|impact|affect|related|depends/i.test(query);
+  const results = hybridSearch(query, broaden ? 4 : 3);
+
+  let expanded = [];
+  if (broaden) {
+    const seen = new Set(results.map(r => r.id));
+    results.slice(0,2).forEach(r => {
+      graphNeighbors(r.id, 1).forEach(n => { if (!seen.has(n.id)) { seen.add(n.id); expanded.push(n); } });
+    });
+  }
+  const latency = (performance.now() - t0).toFixed(1);
+
+  let html = '<div class="stage">Retrieval (TF-IDF + BM25, live)</div>';
+  results.forEach(r => {
+    html += `<div class="result"><div class="top-row"><h3>${r.title}</h3><span class="score">score ${r.score.toFixed(3)}</span></div>
+      <p>${r.text}</p></div>`;
+  });
+  if (expanded.length) {
+    html += '<div class="stage">Graph Expansion (GraphRAG, live)</div>';
+    expanded.forEach(e => {
+      html += `<div class="result"><div class="top-row"><h3>${e.title}</h3><span class="tag graph-tag">${e.path}</span></div></div>`;
+    });
+  }
+  output.innerHTML = html;
+  metrics.style.display = 'flex';
+  metrics.innerHTML = `<span><b>${results.length + expanded.length}</b> results</span>
+    <span><b>${latency}ms</b> client-side latency</span>
+    <span><b>${broaden ? 'yes' : 'no'}</b> graph expansion triggered</span>
+    <span>query intent: <b>${broaden ? 'relational' : 'direct'}</b></span>`;
+}
+
+document.getElementById('queryInput').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
+runQuery();
+</script>
+</body>
+</html>
