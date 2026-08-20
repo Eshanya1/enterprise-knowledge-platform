@@ -14,8 +14,13 @@ POST /query ──▶ LangGraph pipeline (agent_pipeline.py)
                   ├─ plan            decide retrieval breadth from query intent
                   ├─ retrieve        hybrid TF-IDF + BM25 search, over-fetch
                   ├─ (MMR rerank)    drop redundant near-duplicate hits
-                  ├─ expand_graph    NetworkX traversal: pull structurally
-                  │                  related docs (issues/ADRs/dependencies)
+                  │
+                  ├─ [conditional edge: does this query need graph context?]
+                  │     yes ─▶ expand_graph   NetworkX traversal: pull structurally
+                  │            │              related docs (issues/ADRs/dependencies)
+                  │            ▼
+                  │     no  ───────────────┐  (expand_graph is not invoked at all)
+                  │                        ▼
                   ├─ verify          drop low-confidence retrieval hits
                   ├─ summarize       extractive by default, LLM if OPENAI_API_KEY set
                   └─ cite            doc_id citation list
@@ -31,16 +36,28 @@ POST /query ──▶ LangGraph pipeline (agent_pipeline.py)
   evaluate the retriever at all. `evaluation.py` runs a hand-labeled query
   set through the hybrid retriever and reports real numbers:
   **Precision@3 = 0.667, MRR = 1.0** (every query's top hit is correct).
-  Exposed live via `GET /eval`.
+  Exposed live via `GET /eval`. Read honestly: the eval set is 6 queries
+  against an 8-document corpus with high lexical overlap between queries and
+  doc titles — MRR=1.0 demonstrates the harness computes real numbers
+  correctly, not that retrieval is bulletproof at production scale or
+  against harder, less lexically-obvious queries.
 - **MMR reranking** (`mmr.py`) — over-fetches candidates then reranks for
   diversity, so a query doesn't return 3 near-duplicate "service overview"
   docs. Verified this actually changes the result set, not just theoretically
   present.
-- **Real LangGraph multi-agent orchestration** — 6-node `StateGraph`
-  (plan → retrieve → expand_graph → verify → summarize → cite), not a
-  single monolithic function pretending to be "agents." Query planning
-  decides whether to trigger graph expansion based on query intent
-  (e.g. "why/impact/depends" language).
+- **Real LangGraph conditional orchestration** — a 6-node `StateGraph`
+  (plan → retrieve → expand_graph → verify → summarize → cite) where the
+  retrieve → expand_graph edge is an actual `add_conditional_edges` route,
+  not an if-statement hiding inside a node that always runs: for queries the
+  planner judges narrow, `expand_graph` is never invoked at all (its output
+  key is entirely absent from the resulting state — verified in
+  `test_expand_graph_node_is_never_invoked_for_narrow_queries`), while
+  relational-sounding queries ("why/impact/depends" language) route through
+  it. That's the actual justification for a graph-orchestration framework
+  here over a plain function-call chain — an earlier version of this pipeline
+  used only static edges, which made LangGraph syntax around what was
+  functionally `plan(retrieve(verify(...)))`, indistinguishable in behavior
+  from a script with no framework at all.
 - **GraphRAG** — relationships between services/issues/ADRs modeled as a
   real graph (NetworkX) with multi-hop traversal, not just metadata tags.
 - **Auth**: API-key auth (SHA-256 hashed, never stored plaintext) on every
@@ -49,8 +66,9 @@ POST /query ──▶ LangGraph pipeline (agent_pipeline.py)
   indistinguishable from a malformed request — fixed to return a proper 401.
 - **Persistence**: every query, its citations, and latency are logged to
   SQLite (`GET /stats` reports real query volume/latency, not mock data).
-- **Tests**: 16 passing pytest cases across retrieval, graph traversal, MMR,
-  the evaluation harness itself, and the full agent pipeline.
+- **Tests**: 18 passing pytest cases across retrieval, graph traversal, MMR,
+  the evaluation harness itself, and the full agent pipeline (including the
+  conditional-routing behavior above).
 
 **Explicitly not production-grade (by design, for portfolio scope):**
 - Retrieval uses TF-IDF + BM25, not transformer embeddings. I tried

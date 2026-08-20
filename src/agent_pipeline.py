@@ -1,7 +1,16 @@
 """
 Multi-agent workflow implemented as a LangGraph StateGraph:
 
-  plan -> retrieve -> expand_graph -> verify -> summarize -> cite
+  plan -> retrieve -> [expand_graph?] -> verify -> summarize -> cite
+
+The plan -> expand_graph edge is a real conditional edge (add_conditional_edges),
+not a static chain with an if-statement hiding inside a node: for queries the
+planner judges narrow (e.g. "billing service payments"), expand_graph is never
+invoked at all -- the graph is genuinely shaped differently per query, which is
+the actual reason to use a graph-orchestration framework here rather than a
+plain `plan(retrieve(verify(...)))` call chain. (An earlier version always ran
+expand_graph and had it silently no-op internally -- same end state, but
+LangGraph syntax around what was functionally a linear script.)
 
 Each node is a plain Python function operating on a shared state dict --
 no LLM API key required to run this end-to-end (summarization uses
@@ -52,9 +61,9 @@ def retrieve_node(state: AgentState) -> AgentState:
 
 
 def expand_graph_node(state: AgentState) -> AgentState:
-    if not state["plan"]["expand_graph"]:
-        state["expanded"] = []
-        return state
+    # No internal skip-check here anymore -- routing to this node at all is
+    # now the graph's job (see route_after_retrieve / add_conditional_edges
+    # below), not a no-op branch hiding inside the node.
     seen = {d["doc_id"] for d in state["retrieved"]}
     expanded = []
     for d in state["retrieved"][:2]:  # expand from the top hits only
@@ -73,8 +82,10 @@ def expand_graph_node(state: AgentState) -> AgentState:
 
 def verify_node(state: AgentState) -> AgentState:
     """Drop low-confidence retrieval hits; graph-expanded docs are kept
-    (they're structurally relevant even if lexically dissimilar)."""
-    verified = [d for d in state["retrieved"] if d["score"] > 0.05] + state["expanded"]
+    (they're structurally relevant even if lexically dissimilar). expand_graph
+    may have been skipped entirely by the router above, so .get() defensively
+    rather than assuming the key exists."""
+    verified = [d for d in state["retrieved"] if d["score"] > 0.05] + state.get("expanded", [])
     state["verified"] = verified
     return state
 
@@ -114,6 +125,13 @@ def cite_node(state: AgentState) -> AgentState:
     return state
 
 
+def route_after_retrieve(state: AgentState) -> str:
+    """Real conditional routing, not an if-statement inside a node: only
+    queries the planner judged relational/broad (state["plan"]["expand_graph"])
+    actually visit expand_graph. Everything else skips straight to verify."""
+    return "expand_graph" if state["plan"]["expand_graph"] else "verify"
+
+
 def build_graph():
     g = StateGraph(AgentState)
     g.add_node("plan", plan_node)
@@ -125,7 +143,7 @@ def build_graph():
 
     g.set_entry_point("plan")
     g.add_edge("plan", "retrieve")
-    g.add_edge("retrieve", "expand_graph")
+    g.add_conditional_edges("retrieve", route_after_retrieve, {"expand_graph": "expand_graph", "verify": "verify"})
     g.add_edge("expand_graph", "verify")
     g.add_edge("verify", "summarize")
     g.add_edge("summarize", "cite")
